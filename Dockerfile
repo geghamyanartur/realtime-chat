@@ -13,12 +13,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Set workdir
 WORKDIR /var/www/html
 
-# Copy composer files and install PHP deps
-COPY composer.json composer.lock ./
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader
-
-# Copy app source
+# Copy app source and install PHP deps
 COPY . .
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader
 
 # Build frontend
 FROM node:20-bullseye-slim as frontend
