@@ -72,13 +72,23 @@
                                             {{ message.sender }}
                                         </span>
                                         <span>·</span>
-                                        <span>{{ formatTime(message.created_at) }}</span>
+                                        <span :class="message.error ? 'text-rose-300' : 'text-slate-400'">
+                                            {{ formatTime(message) }}
+                                        </span>
                                     </div>
                                     <div
                                         class="max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-lg shadow-slate-950/40"
-                                        :class="message.is_ai ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-slate-800/70 border border-slate-700/70'"
+                                        :class="[
+                                            message.is_ai
+                                                ? 'bg-emerald-500/10 border border-emerald-500/30'
+                                                : 'bg-slate-800/70 border border-slate-700/70',
+                                            message.error ? 'border-rose-400/60 text-rose-100' : '',
+                                            message.pending ? 'opacity-80' : '',
+                                        ]"
                                     >
                                         {{ message.body }}
+                                        <span v-if="message.pending" class="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-300"></span>
+                                        <span v-else-if="message.error" class="ml-2 text-rose-200 text-xs">error</span>
                                     </div>
                                 </article>
                             </template>
@@ -107,7 +117,7 @@
                                 {{ sending ? 'Sending…' : 'Send' }}
                             </button>
                             <button
-                                class="rounded-xl border border-emerald-400/60 bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/30 transition hover:-translate-y-[1px] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+                                class="rounded-xl border border-emerald-400/60 bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/30 transition hover:-translate-y-px hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
                                 :disabled="sending || aiThinking"
                                 @click="sendWithAi"
                             >
@@ -121,7 +131,7 @@
                     </p>
                 </section>
 
-                <aside class="flex flex-col gap-4 rounded-2xl border border-slate-800/70 bg-gradient-to-b from-slate-900/80 to-slate-950/80 p-5 shadow-lg backdrop-blur">
+                <aside class="flex flex-col gap-4 rounded-2xl border border-slate-800/70 bg-linear-to-b from-slate-900/80 to-slate-950/80 p-5 shadow-lg backdrop-blur">
                     <div>
                         <p class="text-xs uppercase tracking-[0.2em] text-emerald-200">AI playbook</p>
                         <h2 class="mt-2 text-xl font-semibold text-white">What the co-host can do</h2>
@@ -130,13 +140,6 @@
                             <li>· Keep replies short (under ~80 words).</li>
                             <li>· Uses the last few messages as context to stay on topic.</li>
                         </ul>
-                    </div>
-                    <div class="rounded-xl border border-cyan-400/30 bg-cyan-500/10 p-4 text-sm text-cyan-50">
-                        <p class="font-semibold text-cyan-100">Quick tip</p>
-                        <p class="mt-2">
-                            Realtime uses the <code class="text-emerald-200">public.chat</code> channel. Configure your Pusher-compatible
-                            server (or Laravel Reverb) and set <code class="text-emerald-200">BROADCAST_CONNECTION=pusher</code> to make it live.
-                        </p>
                     </div>
                     <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
                         <p class="font-semibold text-white">API endpoints</p>
@@ -189,15 +192,26 @@ const realtimeStatusLabel = computed(() => {
     return 'Realtime disabled (using HTTP)';
 });
 
-const formatTime = (value) => {
-    const date = value ? new Date(value) : new Date();
+const formatTime = (message) => {
+    if (message.pending) return 'sending…';
+    if (message.error) return 'failed';
+    const date = message.created_at ? new Date(message.created_at) : new Date();
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 const pushMessage = (incoming) => {
-    const exists = messages.value.some((m) => m.id === incoming.id);
+    // If matching temp marker, replace; otherwise append if not duplicate.
+    if (incoming.localTempId) {
+        const idx = messages.value.findIndex((m) => m.localTempId === incoming.localTempId);
+        if (idx !== -1) {
+            messages.value[idx] = { ...messages.value[idx], ...incoming, pending: false, error: false };
+            return;
+        }
+    }
+
+    const exists = messages.value.some((m) => m.id === incoming.id && m.id !== undefined);
     if (!exists) {
-        messages.value.push(incoming);
+        messages.value.push({ pending: false, error: false, ...incoming });
     }
 };
 
@@ -226,13 +240,33 @@ const sendToApi = async (body) => {
     if (!body) return null;
     sending.value = true;
     error.value = '';
+
+    const tempId = `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const optimistic = {
+        id: undefined,
+        localTempId: tempId,
+        sender: sender.value,
+        body,
+        is_ai: false,
+        created_at: null,
+        pending: true,
+        error: false,
+    };
+
+    messages.value.push(optimistic);
+    await scrollToBottom();
+
     try {
         const { data } = await axios.post('/api/messages', { sender: sender.value, body });
-        pushMessage(data);
+        pushMessage({ ...data, localTempId: tempId });
         await scrollToBottom();
         return body;
     } catch (err) {
         error.value = 'Could not send message.';
+        const idx = messages.value.findIndex((m) => m.localTempId === tempId);
+        if (idx !== -1) {
+            messages.value[idx] = { ...messages.value[idx], pending: false, error: true, created_at: null };
+        }
         return null;
     } finally {
         sending.value = false;
