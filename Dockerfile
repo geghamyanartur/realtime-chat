@@ -1,33 +1,28 @@
-FROM php:8.3-fpm-bullseye as base
+FROM php:8.3-bullseye as base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git curl zip unzip libpq-dev libonig-dev libxml2-dev libzip-dev libsqlite3-dev \
-    && docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite \
-    && docker-php-ext-install zip \
+    && docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Set workdir
 WORKDIR /var/www/html
 
-# Copy app source and install PHP deps
+# Copy full app and install PHP dependencies
 COPY . .
 RUN composer install --no-interaction --prefer-dist --optimize-autoloader
 
-# Build frontend
-FROM node:20-bullseye-slim as frontend
+# Node dependencies
+FROM node:20-bullseye-slim as node_deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
-COPY resources resources
-COPY vite.config.js ./
-RUN npm run build
 
 # Final image
-FROM php:8.3-fpm-bullseye
+FROM php:8.3-bullseye
 
 RUN apt-get update && apt-get install -y libpq-dev libzip-dev libsqlite3-dev \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql pdo_sqlite zip \
@@ -35,27 +30,26 @@ RUN apt-get update && apt-get install -y libpq-dev libzip-dev libsqlite3-dev \
 
 WORKDIR /var/www/html
 
-# Copy vendor from build stage
+# Copy app with vendor
 COPY --from=base /var/www/html /var/www/html
 
-# Copy built frontend
-COPY --from=frontend /app/public ./public
+# Add Node runtime and npm
+COPY --from=node:20-bullseye-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:20-bullseye-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# Environment
-ENV APP_ENV=production \
-    APP_DEBUG=false \
-    QUEUE_CONNECTION=sync \
-    CACHE_STORE=database \
-    SESSION_DRIVER=database \
-    BROADCAST_CONNECTION=pusher
+# Bring preinstalled node_modules for faster builds
+COPY --from=node_deps /app/node_modules /var/www/html/node_modules
+COPY --from=node_deps /app/package*.json /var/www/html/
 
 # Ensure storage/bootstrap writable
 RUN chown -R www-data:www-data storage bootstrap/cache
 
-# Expose FPM port
 EXPOSE 8000
 
 CMD ["sh", "-c", "\
+npm run build && \
 php artisan config:cache && \
 php artisan route:cache && \
 php artisan view:cache && \
