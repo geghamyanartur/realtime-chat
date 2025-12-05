@@ -71,6 +71,8 @@
                                     <span :class="message.error ? 'text-rose-300' : 'text-slate-400'">
                                         {{ formatTime(message) }}
                                     </span>
+                                    <span v-if="message.pending" class="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-300"></span>
+                                    <span v-else-if="message.error" class="ml-2 text-rose-200 text-xs">error</span>
                                 </div>
                                 <div
                                     class="max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-lg shadow-slate-950/40"
@@ -82,9 +84,7 @@
                                         message.pending ? 'opacity-80' : '',
                                     ]"
                                 >
-                                    {{ message.body }}
-                                    <span v-if="message.pending" class="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-300"></span>
-                                    <span v-else-if="message.error" class="ml-2 text-rose-200 text-xs">error</span>
+                                    <div class="chat-rich space-y-1" v-html="renderBody(message.body)"></div>
                                 </div>
                             </article>
                         </template>
@@ -94,14 +94,7 @@
                 <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end">
                     <div class="flex-1">
                         <label class="text-xs uppercase tracking-[0.2em] text-slate-400">Message</label>
-                        <textarea
-                            v-model="draft"
-                            rows="3"
-                            class="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm text-slate-50 outline-none ring-cyan-400/40 focus:border-cyan-400/60 focus:ring-2"
-                            placeholder="Share updates, questions, or @ mention the AI."
-                            @keydown.meta.enter.prevent="sendMessage"
-                            @keydown.ctrl.enter.prevent="sendMessage"
-                        ></textarea>
+                        <ChatEditor v-model="draft" class="mt-2" placeholder="Share updates, questions, or @ mention the AI." @submit="sendMessage" />
                         <p class="mt-1 text-[11px] text-slate-400">Cmd/Ctrl + Enter to send.</p>
                     </div>
                     <div class="flex gap-2">
@@ -169,6 +162,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import ChatEditor from '@/components/editor/ChatEditor.vue';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useMessagesStore } from '../stores/useMessagesStore';
 
@@ -233,14 +227,14 @@ const sendToApi = async (body) => {
 };
 
 const sendMessage = async () => {
-    const body = draft.value.trim();
+    const body = sanitizeHtml(draft.value);
     if (!body) return;
     draft.value = '';
     await sendToApi(body);
 };
 
 const sendWithAi = async () => {
-    const body = draft.value.trim();
+    const body = sanitizeHtml(draft.value);
     if (!body) return;
     draft.value = '';
 
@@ -305,4 +299,81 @@ watch(
         sender.value = name || 'You';
     },
 );
+
+const sanitizeHtml = (html) => {
+    if (!html) return '';
+    const allowed = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'UL', 'OL', 'LI', 'CODE', 'PRE', 'BLOCKQUOTE']);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const cleanse = (node) => {
+        const children = Array.from(node.childNodes);
+        for (const child of children) {
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                if (!allowed.has(child.tagName)) {
+                    const text = document.createTextNode(child.textContent || '');
+                    node.replaceChild(text, child);
+                    continue;
+                }
+                while (child.attributes.length) {
+                    child.removeAttribute(child.attributes[0].name);
+                }
+                cleanse(child);
+            }
+        }
+    };
+
+    cleanse(doc.body);
+    return doc.body.innerHTML.trim();
+};
+
+const renderBody = (body) => {
+    return sanitizeHtml(body);
+};
 </script>
+
+<style scoped>
+:deep(.chat-rich ul) {
+    list-style: disc;
+    padding-left: 1.25rem;
+    margin: 0.4rem 0;
+}
+
+:deep(.chat-rich ol) {
+    list-style: decimal;
+    padding-left: 1.25rem;
+    margin: 0.4rem 0;
+}
+
+:deep(.chat-rich li) {
+    margin: 0.15rem 0;
+}
+
+:deep(.chat-rich code) {
+    background: rgba(148, 163, 184, 0.2);
+    padding: 0.1rem 0.25rem;
+    border-radius: 0.25rem;
+}
+
+:deep(.chat-rich blockquote) {
+    border-left: 3px solid rgba(255, 255, 255, 0.25);
+    margin: 1rem 0;
+    padding-left: 1rem;
+}
+
+:deep(.chat-rich pre) {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 0.5rem;
+    color: inherit;
+    font-family: 'JetBrainsMono', monospace;
+    margin: 1.5rem 0;
+    padding: 0.75rem 1rem;
+}
+
+:deep(.chat-rich pre code) {
+    background: none;
+    color: inherit;
+    font-size: 0.8rem;
+    padding: 0;
+}
+</style>
