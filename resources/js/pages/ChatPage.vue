@@ -1,0 +1,308 @@
+<template>
+    <div class="flex flex-col gap-6">
+        <header class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <p class="text-sm uppercase tracking-[0.2em] text-emerald-200">Realtime + AI</p>
+                <h1 class="text-3xl font-semibold leading-tight text-white lg:text-4xl">
+                    Vue chat on Laravel, with an AI co-host
+                </h1>
+                <p class="mt-2 max-w-2xl text-sm text-slate-300">
+                    Send messages instantly, let the AI jump in, and watch updates stream across everyone connected.
+                </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <span
+                    class="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-400/30"
+                >
+                    <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Live channel: public.chat
+                </span>
+                <span
+                    class="inline-flex items-center gap-2 rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-semibold text-cyan-100 ring-1 ring-cyan-400/30"
+                >
+                    AI model: {{ aiModelLabel }}
+                </span>
+            </div>
+        </header>
+
+        <div class="grid gap-5 lg:grid-cols-[1.6fr,1fr]">
+            <section class="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-4 shadow-lg backdrop-blur">
+                <div class="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <label class="flex flex-col text-xs uppercase tracking-[0.2em] text-slate-400">
+                        Display name
+                        <input
+                            v-model="sender"
+                            :disabled="Boolean(currentUser)"
+                            class="mt-1 rounded-lg border border-slate-700/80 bg-slate-800/80 px-3 py-2 text-sm text-slate-50 outline-none ring-emerald-400/40 focus:border-emerald-400/50 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-70"
+                            :placeholder="currentUser ? 'Using account name' : 'Your handle'"
+                        />
+                        <span v-if="currentUser" class="mt-1 text-[11px] text-emerald-200">Using signed-in name (cannot edit).</span>
+                        <span v-else class="mt-1 text-[11px] text-slate-400">Guests can pick a handle for this session.</span>
+                    </label>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="h-2.5 w-2.5 rounded-full" :class="statusDot"></span>
+                        <span class="text-slate-300">{{ realtimeStatusLabel }}</span>
+                    </div>
+                </div>
+
+                <div
+                    class="relative flex h-[56vh] flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-950/70"
+                    ref="messagesPane"
+                >
+                    <div ref="messagesScroller" class="flex-1 space-y-3 overflow-y-auto p-4">
+                        <div v-if="messagesStore.loading" class="space-y-3">
+                            <div v-for="n in 4" :key="n" class="h-16 rounded-xl bg-slate-800/60"></div>
+                        </div>
+                        <div v-else-if="!messagesStore.messages.length" class="grid h-full place-items-center text-sm text-slate-400">
+                            Start the conversation with a message below.
+                        </div>
+                        <template v-else>
+                            <article
+                                v-for="message in messagesStore.messages"
+                                :key="message.id"
+                                class="flex flex-col gap-1"
+                                :class="message.is_ai ? 'items-start' : 'items-end'"
+                            >
+                                <div class="flex items-center gap-2 text-xs text-slate-400">
+                                    <span class="font-semibold" :class="message.is_ai ? 'text-emerald-200' : 'text-cyan-200'">
+                                        {{ message.sender }}
+                                    </span>
+                                    <span>·</span>
+                                    <span :class="message.error ? 'text-rose-300' : 'text-slate-400'">
+                                        {{ formatTime(message) }}
+                                    </span>
+                                </div>
+                                <div
+                                    class="max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-lg shadow-slate-950/40"
+                                    :class="[
+                                        message.is_ai
+                                            ? 'bg-emerald-500/10 border border-emerald-500/30'
+                                            : 'bg-slate-800/70 border border-slate-700/70',
+                                        message.error ? 'border-rose-400/60 text-rose-100' : '',
+                                        message.pending ? 'opacity-80' : '',
+                                    ]"
+                                >
+                                    {{ message.body }}
+                                    <span v-if="message.pending" class="ml-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-300"></span>
+                                    <span v-else-if="message.error" class="ml-2 text-rose-200 text-xs">error</span>
+                                </div>
+                            </article>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end">
+                    <div class="flex-1">
+                        <label class="text-xs uppercase tracking-[0.2em] text-slate-400">Message</label>
+                        <textarea
+                            v-model="draft"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm text-slate-50 outline-none ring-cyan-400/40 focus:border-cyan-400/60 focus:ring-2"
+                            placeholder="Share updates, questions, or @ mention the AI."
+                            @keydown.meta.enter.prevent="sendMessage"
+                            @keydown.ctrl.enter.prevent="sendMessage"
+                        ></textarea>
+                        <p class="mt-1 text-[11px] text-slate-400">Cmd/Ctrl + Enter to send.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button
+                            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="messagesStore.sending"
+                            @click="sendMessage"
+                        >
+                            {{ messagesStore.sending ? 'Sending…' : 'Send' }}
+                        </button>
+                        <button
+                            class="rounded-xl border border-emerald-400/60 bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/30 transition hover:-translate-y-px hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+                            :disabled="messagesStore.sending || messagesStore.aiThinking"
+                            @click="sendWithAi"
+                        >
+                            {{ messagesStore.aiThinking ? 'AI is thinking…' : 'Send + Ask AI' }}
+                        </button>
+                    </div>
+                </div>
+
+                <p v-if="messagesStore.error" class="mt-3 text-sm text-rose-300">
+                    {{ messagesStore.error }}
+                </p>
+            </section>
+
+            <aside
+                class="flex flex-col gap-4 rounded-2xl border border-slate-800/70 bg-linear-to-b from-slate-900/80 to-slate-950/80 p-5 shadow-lg backdrop-blur"
+            >
+                <div>
+                    <p class="text-xs uppercase tracking-[0.2em] text-emerald-200">AI playbook</p>
+                    <h2 class="mt-2 text-xl font-semibold text-white">What the co-host can do</h2>
+                    <ul class="mt-3 space-y-2 text-sm text-slate-300">
+                        <li>· Answer questions and summarize ongoing threads.</li>
+                        <li>· Keep replies short (under ~80 words).</li>
+                        <li>· Uses the last few messages as context to stay on topic.</li>
+                    </ul>
+                </div>
+                <div class="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
+                    <p class="font-semibold text-white">API endpoints</p>
+                    <ul class="mt-2 space-y-1 text-slate-300">
+                        <li><code>/api/messages</code> – list + create messages</li>
+                        <li><code>/api/messages/ai-reply</code> – request AI response</li>
+                    </ul>
+                    <p class="mt-3 text-xs text-slate-500">
+                        Set <code>OPENAI_API_KEY</code> to enable the live model; otherwise you’ll get a friendly offline response.
+                    </p>
+                </div>
+            </aside>
+        </div>
+
+        <footer class="mt-2 flex flex-col gap-2 border-t border-slate-800/70 pt-6 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-xs text-slate-200">
+                    Laravel · Vue · Echo
+                </span>
+                <span class="rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-xs text-slate-200">
+                    AI replies optional per send
+                </span>
+            </div>
+            <p class="text-slate-500">Built for realtime collaboration; keep this tab open to stay synced.</p>
+        </footer>
+    </div>
+</template>
+
+<script setup>
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useMessagesStore } from '../stores/useMessagesStore';
+
+const messagesStore = useMessagesStore();
+const draft = ref('');
+const sender = ref('You');
+const authStore = useAuthStore();
+const { token: authToken, user: currentUser } = storeToRefs(authStore);
+
+const messagesPane = ref(null);
+const messagesScroller = ref(null);
+
+const aiModelLabel = computed(() => import.meta.env.VITE_AI_MODEL ?? 'gpt-4o-mini');
+
+const activeSender = computed(() => currentUser.value?.name || sender.value);
+
+const statusDot = computed(() => {
+    switch (messagesStore.realtimeStatus) {
+        case 'live':
+            return 'bg-emerald-400 shadow-[0_0_0_6px_rgba(16,185,129,0.12)]';
+        case 'checking':
+            return 'bg-amber-300 shadow-[0_0_0_6px_rgba(253,224,71,0.12)]';
+        default:
+            return 'bg-slate-500 shadow-[0_0_0_6px_rgba(148,163,184,0.12)]';
+    }
+});
+
+const realtimeStatusLabel = computed(() => {
+    if (messagesStore.realtimeStatus === 'live') return 'Realtime ready';
+    if (messagesStore.realtimeStatus === 'checking') return 'Waiting for websocket...';
+    return 'Realtime disabled (using HTTP)';
+});
+
+const formatTime = (message) => {
+    if (message.pending) return 'sending…';
+    if (message.error) return 'failed';
+    const date = message.created_at ? new Date(message.created_at) : new Date();
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const scrollToBottom = async () => {
+    await nextTick();
+    const target = messagesScroller.value || messagesPane.value;
+    if (target) {
+        target.scrollTop = target.scrollHeight;
+    }
+};
+
+const loadMessages = async () => {
+    await messagesStore.loadMessages();
+    scrollToBottom();
+};
+
+const sendToApi = async (body) => {
+    const sent = await messagesStore.sendMessage({
+        body,
+        sender: sender.value,
+        activeSender: activeSender.value,
+    });
+    await scrollToBottom();
+    return sent;
+};
+
+const sendMessage = async () => {
+    const body = draft.value.trim();
+    if (!body) return;
+    draft.value = '';
+    await sendToApi(body);
+};
+
+const sendWithAi = async () => {
+    const body = draft.value.trim();
+    if (!body) return;
+    draft.value = '';
+
+    const sent = await messagesStore.sendWithAi({
+        body,
+        sender: sender.value,
+        activeSender: activeSender.value,
+    });
+    if (sent) {
+        await scrollToBottom();
+    }
+};
+
+const initRealtime = () => {
+    if (typeof window === 'undefined') return;
+
+    const connect = () => {
+        if (!window.Echo) {
+            messagesStore.setRealtimeStatus('offline');
+            return;
+        }
+
+        messagesStore.setRealtimeStatus('checking');
+        try {
+            window.Echo.channel('public.chat')
+                .listen('.message.created', (payload) => {
+                    messagesStore.setRealtimeStatus('live');
+                    messagesStore.pushMessage(payload);
+                    scrollToBottom();
+                })
+                .error(() => {
+                    messagesStore.setRealtimeStatus('offline');
+                });
+        } catch {
+            messagesStore.setRealtimeStatus('offline');
+        }
+    };
+
+    // Connect immediately if Echo is ready, otherwise wait for bootstrap to emit.
+    if (window.Echo) {
+        connect();
+    } else {
+        messagesStore.setRealtimeStatus('checking');
+        window.addEventListener('echo-ready', connect, { once: true });
+    }
+};
+
+onMounted(() => {
+    loadMessages();
+    initRealtime();
+    sender.value = currentUser.value?.name || 'You';
+});
+
+watch(
+    () => messagesStore.messages.length,
+    () => scrollToBottom(),
+);
+
+watch(
+    () => currentUser.value?.name,
+    (name) => {
+        sender.value = name || 'You';
+    },
+);
+</script>
