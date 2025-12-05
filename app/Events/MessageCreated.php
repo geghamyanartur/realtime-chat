@@ -19,7 +19,7 @@ class MessageCreated implements ShouldBroadcast
 
     public function broadcastOn(): Channel
     {
-        return new Channel('public.chat');
+        return new Channel('chat.'.$this->message->chat_id);
     }
 
     public function broadcastAs(): string
@@ -34,6 +34,8 @@ class MessageCreated implements ShouldBroadcast
             'sender' => $this->message->sender,
             'body' => $this->message->body,
             'is_ai' => $this->message->is_ai,
+            'chat_id' => $this->message->chat_id,
+            'sender_id' => $this->message->sender_id,
             'created_at' => $this->message->created_at?->toISOString(),
         ];
     }

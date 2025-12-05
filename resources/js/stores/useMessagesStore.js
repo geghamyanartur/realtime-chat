@@ -9,6 +9,7 @@ export const useMessagesStore = defineStore('messages', () => {
     const aiThinking = ref(false);
     const error = ref('');
     const realtimeStatus = ref('checking'); // checking | live | offline
+    const currentChatId = ref(null);
 
     const hasMessages = computed(() => messages.value.length > 0);
 
@@ -28,10 +29,11 @@ export const useMessagesStore = defineStore('messages', () => {
         }
     };
 
-    const loadMessages = async () => {
+    const loadMessages = async (chatId) => {
+        currentChatId.value = chatId;
         loading.value = true;
         try {
-            const { data } = await axios.get('/api/messages');
+            const { data } = await axios.get('/api/messages', { params: { chat_id: chatId } });
             messages.value = data;
         } catch (err) {
             error.value = 'Unable to load messages right now.';
@@ -40,8 +42,9 @@ export const useMessagesStore = defineStore('messages', () => {
         }
     };
 
-    const sendMessage = async ({ body, sender, activeSender }) => {
+    const sendMessage = async ({ body, sender, activeSender, chatId, senderId }) => {
         if (!body) return null;
+        const targetChatId = chatId || currentChatId.value;
         sending.value = true;
         error.value = '';
 
@@ -52,6 +55,8 @@ export const useMessagesStore = defineStore('messages', () => {
             sender: activeSender,
             body,
             is_ai: false,
+            sender_id: senderId,
+            chat_id: targetChatId,
             created_at: null,
             pending: true,
             error: false,
@@ -60,7 +65,7 @@ export const useMessagesStore = defineStore('messages', () => {
         messages.value.push(optimistic);
 
         try {
-            const { data } = await axios.post('/api/messages', { sender, body });
+            const { data } = await axios.post('/api/messages', { sender, body, chat_id: targetChatId });
             pushMessage({ ...data, localTempId: tempId });
             return body;
         } catch (err) {
@@ -75,14 +80,14 @@ export const useMessagesStore = defineStore('messages', () => {
         }
     };
 
-    const sendWithAi = async ({ body, sender, activeSender }) => {
+    const sendWithAi = async ({ body, sender, activeSender, chatId, senderId }) => {
         if (!body) return null;
-        const sent = await sendMessage({ body, sender, activeSender });
+        const sent = await sendMessage({ body, sender, activeSender, chatId, senderId });
         if (!sent) return null;
 
         aiThinking.value = true;
         try {
-            const { data } = await axios.post('/api/messages/ai-reply', { sender: activeSender, body });
+            const { data } = await axios.post('/api/messages/ai-reply', { sender: activeSender, body, chat_id: chatId || currentChatId.value });
             pushMessage(data);
             return data;
         } catch (err) {

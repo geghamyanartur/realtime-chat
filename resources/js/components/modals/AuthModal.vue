@@ -49,6 +49,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
 import axios from 'axios';
+import { useAuthStore } from '@/stores/useAuthStore';
 import ModalFrame from './ModalFrame.vue';
 
 const props = defineProps({
@@ -57,6 +58,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close', 'authenticated']);
+const authStore = useAuthStore();
 
 const mode = ref(props.initialMode);
 const loading = ref(false);
@@ -74,6 +76,9 @@ watch(
             mode.value = props.initialMode;
             error.value = '';
             loading.value = false;
+            form.name = '';
+            form.email = '';
+            form.password = '';
         }
     },
 );
@@ -89,22 +94,31 @@ const modeSubtitle = computed(() =>
 const toggleMode = () => {
     mode.value = mode.value === 'login' ? 'register' : 'login';
     error.value = '';
+    if (mode.value === 'login') {
+        form.name = '';
+    }
 };
 
 const submit = async () => {
     loading.value = true;
     error.value = '';
     try {
-        const endpoint = mode.value === 'login' ? '/api/auth/login' : '/api/auth/register';
         const payload = {
             email: form.email,
             password: form.password,
         };
+
         if (mode.value === 'register') {
             payload.name = form.name;
+            await axios.post('/api/auth/register', payload);
         }
-        const { data } = await axios.post(endpoint, payload);
-        emit('authenticated', data);
+
+        const { data } = await axios.post('/api/auth/login', payload);
+        if (data?.token) {
+            authStore.setAuthToken(data.token);
+        }
+        const me = await authStore.fetchMe();
+        emit('authenticated', { token: data?.token, user: me || data?.user });
         emit('close');
     } catch (err) {
         error.value = err?.response?.data?.message || 'Could not authenticate.';

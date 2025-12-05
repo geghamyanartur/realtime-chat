@@ -15,7 +15,7 @@
                     class="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-100 ring-1 ring-emerald-400/30"
                 >
                     <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Live channel: public.chat
+                    Live chat: {{ currentChat?.name || 'General' }}
                 </span>
                 <span
                     class="inline-flex items-center gap-2 rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-semibold text-cyan-100 ring-1 ring-cyan-400/30"
@@ -24,6 +24,82 @@
                 </span>
             </div>
         </header>
+
+        <div class="flex flex-col gap-3 rounded-2xl border border-slate-800/70 bg-slate-900/60 p-4">
+            <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div class="flex flex-col gap-1">
+                    <p class="text-xs uppercase tracking-[0.2em] text-emerald-200">Chat</p>
+                    <h3 class="text-lg font-semibold text-white">
+                        {{ currentChat?.name || 'General' }}
+                        <span v-if="currentChat?.is_private" class="ml-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-[2px] text-[11px] text-amber-200">
+                            Private
+                        </span>
+                    </h3>
+                    <p class="text-xs text-slate-400">Switch rooms or create a new private chat.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <select
+                        class="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+                        :value="chatsStore.selectedChatId || ''"
+                        @change="chatsStore.setSelected(Number($event.target.value))"
+                    >
+                        <option v-for="chat in chatsStore.chats" :key="chat.id" :value="chat.id">
+                            {{ chat.name }} {{ chat.is_private ? '(private)' : '' }}
+                        </option>
+                    </select>
+                </div>
+            </div>
+                <div class="flex flex-col gap-3 md:flex-row">
+                    <div class="flex-1">
+                        <label class="text-xs uppercase tracking-[0.2em] text-slate-400">Create private chat</label>
+                        <div class="mt-2 flex gap-2">
+                            <input
+                                v-model="newChatName"
+                                class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400"
+                                placeholder="Team sync"
+                                :disabled="!currentUser"
+                            />
+                            <button
+                                class="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-700 disabled:opacity-60"
+                                :disabled="!newChatName || !currentUser"
+                                @click="handleCreateChat"
+                            >
+                                Create
+                            </button>
+                        </div>
+                        <p v-if="!currentUser" class="mt-1 text-xs text-slate-400">Sign in to create private chats.</p>
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-xs uppercase tracking-[0.2em] text-slate-400">Join via invite</label>
+                        <div class="mt-2 flex gap-2">
+                            <input
+                                v-model="joinCode"
+                                class="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                                placeholder="Invite code"
+                            />
+                            <button
+                                class="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-700 disabled:opacity-60"
+                                :disabled="!joinCode"
+                                @click="handleJoinChat"
+                            >
+                                Join
+                            </button>
+                        </div>
+                    </div>
+                <div v-if="currentChat?.owned && currentChat.invite_code" class="flex-1 rounded-lg border border-slate-800/70 bg-slate-900/70 p-3 text-sm text-slate-100">
+                    <p class="text-xs uppercase tracking-[0.2em] text-emerald-200">Invite</p>
+                    <div class="mt-2 flex items-center gap-2">
+                        <code class="rounded-md bg-slate-800 px-2 py-1 text-emerald-100">{{ currentChat.invite_code }}</code>
+                        <button
+                            class="rounded-md px-2 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-800/80"
+                            @click="copyInvite(currentChat.invite_code)"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <div class="grid gap-5 lg:grid-cols-[1.6fr,1fr]">
             <section class="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-4 shadow-lg backdrop-blur">
@@ -61,7 +137,7 @@
                                 v-for="message in messagesStore.messages"
                                 :key="message.id"
                                 class="flex flex-col gap-1"
-                                :class="message.is_ai ? 'items-start' : 'items-end'"
+                                :class="getMessageAlignment(message)"
                             >
                                 <div class="flex items-center gap-2 text-xs text-slate-400">
                                     <span class="font-semibold" :class="message.is_ai ? 'text-emerald-200' : 'text-cyan-200'">
@@ -75,11 +151,13 @@
                                     <span v-else-if="message.error" class="ml-2 text-rose-200 text-xs">error</span>
                                 </div>
                                 <div
-                                    class="max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-lg shadow-slate-950/40"
+                                class="max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-lg shadow-slate-950/40"
                                     :class="[
                                         message.is_ai
                                             ? 'bg-emerald-500/10 border border-emerald-500/30'
-                                            : 'bg-slate-800/70 border border-slate-700/70',
+                                            : isOwnMessage(message)
+                                                ? 'bg-cyan-500/10 border border-cyan-400/40'
+                                                : 'bg-slate-800/70 border border-slate-700/70',
                                         message.error ? 'border-rose-400/60 text-rose-100' : '',
                                         message.pending ? 'opacity-80' : '',
                                     ]"
@@ -160,17 +238,24 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import ChatEditor from '@/components/editor/ChatEditor.vue';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useMessagesStore } from '../stores/useMessagesStore';
+import { useChatsStore } from '../stores/useChatsStore';
 
 const messagesStore = useMessagesStore();
+const chatsStore = useChatsStore();
 const draft = ref('');
 const sender = ref('You');
 const authStore = useAuthStore();
 const { token: authToken, user: currentUser } = storeToRefs(authStore);
+const { currentChat } = storeToRefs(chatsStore);
+const newChatName = ref('');
+const joinCode = ref('');
+const currentChannelName = ref('');
+const authLoading = ref(false);
 
 const messagesPane = ref(null);
 const messagesScroller = ref(null);
@@ -211,8 +296,9 @@ const scrollToBottom = async () => {
     }
 };
 
-const loadMessages = async () => {
-    await messagesStore.loadMessages();
+const loadMessages = async (chatId) => {
+    if (!chatId) return;
+    await messagesStore.loadMessages(chatId);
     scrollToBottom();
 };
 
@@ -221,6 +307,8 @@ const sendToApi = async (body) => {
         body,
         sender: sender.value,
         activeSender: activeSender.value,
+        chatId: chatsStore.selectedChatId,
+        senderId: currentUser.value?.id,
     });
     await scrollToBottom();
     return sent;
@@ -242,25 +330,35 @@ const sendWithAi = async () => {
         body,
         sender: sender.value,
         activeSender: activeSender.value,
+        chatId: chatsStore.selectedChatId,
+        senderId: currentUser.value?.id,
     });
     if (sent) {
         await scrollToBottom();
     }
 };
 
-const initRealtime = () => {
-    if (typeof window === 'undefined') return;
+const subscribeRealtime = (chatId) => {
+    if (typeof window === 'undefined' || !chatId) return;
 
     const connect = () => {
+        if (currentChannelName.value && window.Echo) {
+            window.Echo.leave(currentChannelName.value);
+        }
+
         if (!window.Echo) {
             messagesStore.setRealtimeStatus('offline');
             return;
         }
 
+        const channelName = `chat.${chatId}`;
+        currentChannelName.value = channelName;
         messagesStore.setRealtimeStatus('checking');
+
         try {
-            window.Echo.channel('public.chat')
+            window.Echo.channel(channelName)
                 .listen('.message.created', (payload) => {
+                    if (payload.chat_id !== chatId) return;
                     messagesStore.setRealtimeStatus('live');
                     messagesStore.pushMessage(payload);
                     scrollToBottom();
@@ -273,7 +371,6 @@ const initRealtime = () => {
         }
     };
 
-    // Connect immediately if Echo is ready, otherwise wait for bootstrap to emit.
     if (window.Echo) {
         connect();
     } else {
@@ -282,10 +379,24 @@ const initRealtime = () => {
     }
 };
 
-onMounted(() => {
-    loadMessages();
-    initRealtime();
+onMounted(async () => {
+    await chatsStore.fetchChats();
+    const chatId = chatsStore.selectedChatId;
+    if (chatId) {
+        await loadMessages(chatId);
+        subscribeRealtime(chatId);
+    }
     sender.value = currentUser.value?.name || 'You';
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('chats-refresh', refreshChats);
+    }
+});
+
+onBeforeUnmount(() => {
+    if (typeof window !== 'undefined') {
+        window.removeEventListener('chats-refresh', refreshChats);
+    }
 });
 
 watch(
@@ -299,6 +410,61 @@ watch(
         sender.value = name || 'You';
     },
 );
+
+watch(
+    () => chatsStore.selectedChatId,
+    async (chatId, prev) => {
+        if (chatId && chatId !== prev) {
+            await loadMessages(chatId);
+            subscribeRealtime(chatId);
+        }
+    },
+);
+
+watch(
+    () => currentUser.value,
+    async (user, prev) => {
+        if (prev && !user) {
+            await chatsStore.fetchChats();
+            if (chatsStore.chats.length) {
+                chatsStore.setSelected(chatsStore.chats[0].id);
+                await loadMessages(chatsStore.selectedChatId);
+                subscribeRealtime(chatsStore.selectedChatId);
+            } else {
+                messagesStore.messages = [];
+            }
+        }
+    },
+);
+
+const refreshChats = async () => {
+    await chatsStore.fetchChats();
+    if (chatsStore.selectedChatId) {
+        await loadMessages(chatsStore.selectedChatId);
+        subscribeRealtime(chatsStore.selectedChatId);
+    }
+};
+
+const handleCreateChat = async () => {
+    if (!newChatName.value.trim()) return;
+    await chatsStore.createChat(newChatName.value.trim());
+    newChatName.value = '';
+};
+
+const handleJoinChat = async () => {
+    if (!joinCode.value.trim()) return;
+    await chatsStore.joinChat(joinCode.value.trim());
+    joinCode.value = '';
+};
+
+const copyInvite = async (code) => {
+    if (!code || !navigator?.clipboard) return;
+    try {
+        await navigator.clipboard.writeText(code);
+    } catch (_) {
+        // ignore
+    }
+};
 
 const sanitizeHtml = (html) => {
     if (!html) return '';
@@ -329,6 +495,17 @@ const sanitizeHtml = (html) => {
 
 const renderBody = (body) => {
     return sanitizeHtml(body);
+};
+
+const isOwnMessage = (message) => {
+    if (!currentUser.value) return false;
+    return message.sender_id === currentUser.value.id;
+};
+
+const getMessageAlignment = (message) => {
+    if (message.is_ai) return 'items-start';
+    if (isOwnMessage(message) && currentChat?.value?.is_private) return 'items-end';
+    return 'items-start';
 };
 </script>
 

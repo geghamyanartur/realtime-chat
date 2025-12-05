@@ -66,12 +66,17 @@ const handleAuthSuccess = async ({ token, user }) => {
     if (token) {
         auth.setAuthToken(token);
     }
-    if (user) {
-        auth.user = user;
-        showAuthModal.value = false;
-        return;
+    let me = user;
+    if (!me) {
+        me = await auth.fetchMe();
+    } else {
+        auth.user = me;
     }
-    await auth.fetchMe();
+    // Ensure sender uses this name on reloads
+    if (me?.name) {
+        localStorage.setItem('chat_sender_name', me.name);
+    }
+    window.dispatchEvent(new CustomEvent('chats-refresh'));
     showAuthModal.value = false;
 };
 
